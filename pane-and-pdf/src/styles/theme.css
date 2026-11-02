@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== DESIGN TOKENS: change the whole look from this block only ===== */
+:root {
+  --c-bg: 238 241 244;
+  --c-surface: 255 255 255;
+  --c-surface-2: 227 232 237;
+  --c-line: 213 220 227;
+  --c-fg: 18 32 43;
+  --c-muted: 74 90 104;
+  --c-brand: 14 107 92;
+  --c-brand-fg: 255 255 255;
+  --c-danger: 190 40 40;
+  --c-ok: 22 130 90;
+  --c-side: 18 32 43;
+  --c-side-fg: 220 226 234;
+  --radius: 8px;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-bg: 12 16 22; --c-surface: 22 29 38; --c-surface-2: 32 41 53; --c-line: 48 60 76;
+    --c-fg: 232 237 243; --c-muted: 148 160 176; --c-brand: 52 190 160; --c-brand-fg: 6 20 17;
+  }
+}
+body { @apply bg-bg text-fg font-sans antialiased; }
+:focus-visible { outline: 2px solid rgb(var(--c-brand)); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
