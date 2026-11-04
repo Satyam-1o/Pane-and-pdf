@@ -1,6 +1,11 @@
 // Runs all pdf-lib work off the main thread. No network access is used here.
 import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
 
+const FONTS = {
+  sans: ['Helvetica', 'HelveticaBold', 'HelveticaOblique', 'HelveticaBoldOblique'],
+  serif: ['TimesRoman', 'TimesRomanBold', 'TimesRomanItalic', 'TimesRomanBoldItalic'],
+  mono: ['Courier', 'CourierBold', 'CourierOblique', 'CourierBoldOblique'],
+};
 const progress = (id, value) => self.postMessage({ id, type: 'progress', value });
 
 async function load(buffer) {
@@ -64,27 +69,42 @@ const tasks = {
   },
 
   // items use coordinates normalised 0..1 from the TOP-LEFT of the page as displayed (after rotation).
+  // types: text | edit (cover original text + draw replacement) | rect | highlight | ink
   async annotate({ buffer, items }, p) {
-    const doc = await load(buffer); const font = await doc.embedFont(StandardFonts.Helvetica); const pages = doc.getPages();
+    const doc = await load(buffer); const pages = doc.getPages(); const cache = new Map();
+    const getFont = async (it) => {
+      const key = `${it.family || 'sans'}|${!!it.bold}|${!!it.italic}`;
+      if (!cache.has(key)) {
+        const names = FONTS[it.family] || FONTS.sans;
+        cache.set(key, await doc.embedFont(StandardFonts[names[it.bold ? (it.italic ? 3 : 1) : (it.italic ? 2 : 0)]]));
+      }
+      return cache.get(key);
+    };
     for (const [n, it] of items.entries()) {
       const page = pages[it.page]; if (!page) continue;
       const { width: W, height: H } = page.getSize(); const r = page.getRotation().angle % 360;
       const map = (u, v) => (r === 90 ? { x: v * W, y: u * H } : r === 180 ? { x: W - u * W, y: v * H } : r === 270 ? { x: W - v * W, y: H - u * H } : { x: u * W, y: H - v * H });
-      const dispW = r % 180 ? H : W, dispH = r % 180 ? W : H;
-      if (it.type === 'text' && it.text) {
-        const q = map(it.x, it.y);
-        page.drawText(it.text, { x: q.x, y: q.y, size: it.size, font, color: hex(it.color), rotate: degrees(r) });
-      } else if (it.type === 'rect' || it.type === 'highlight') {
-        const a = map(it.x, it.y), b = map(it.x + it.w, it.y + it.h);
-        const box = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) };
-        if (it.type === 'highlight') page.drawRectangle({ ...box, color: hex(it.color), opacity: 0.35 });
-        else page.drawRectangle({ ...box, borderColor: hex(it.color), borderWidth: 1.5 });
-      } else if (it.type === 'ink') {
-        for (let i = 1; i < it.points.length; i++) {
-          page.drawLine({ start: map(...it.points[i - 1]), end: map(...it.points[i]), thickness: 1.8, color: hex(it.color) });
+      const dispW = r % 180 ? H : W;
+      const rect = (x, y, w, h) => { const a = map(x, y), b = map(x + w, y + h); return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) }; };
+      const write = async (u, v) => { const q = map(u, v); page.drawText(it.text, { x: q.x, y: q.y, size: it.size, font: await getFont(it), color: hex(it.color), rotate: degrees(r) }); };
+      try {
+        if (it.type === 'text' && it.text) await write(it.x, it.y);
+        else if (it.type === 'edit') {
+          page.drawRectangle({ ...rect(it.x, it.y, it.w, it.h), color: hex(it.bg) }); // hides the original text
+          if (it.text) {
+            const tw = (await getFont(it)).widthOfTextAtSize(it.text, it.size) / dispW;
+            const u = it.align === 'center' ? it.x + (it.w - tw) / 2 : it.align === 'right' ? it.x + it.w - tw : it.x;
+            await write(u, it.by);
+          }
+        } else if (it.type === 'highlight') page.drawRectangle({ ...rect(it.x, it.y, it.w, it.h), color: hex(it.color), opacity: 0.35 });
+        else if (it.type === 'rect') page.drawRectangle({ ...rect(it.x, it.y, it.w, it.h), borderColor: hex(it.color), borderWidth: 1.5 });
+        else if (it.type === 'ink') {
+          for (let i = 1; i < it.points.length; i++) page.drawLine({ start: map(...it.points[i - 1]), end: map(...it.points[i]), thickness: 1.8, color: hex(it.color) });
         }
+      } catch (e) {
+        throw new Error(/WinAnsi|encode/i.test(e.message) ? `"${(it.text || '').slice(0, 30)}" has characters the built-in fonts can't draw (Latin letters, digits and common punctuation only).` : e.message);
       }
-      void dispW; void dispH; p((n + 1) / items.length);
+      p((n + 1) / items.length);
     }
     return doc.save();
   },
